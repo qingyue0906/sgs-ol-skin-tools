@@ -24,7 +24,7 @@
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectBig/{id}/
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectNew/{id}/
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/dynamic/{id}/
-  (三个目录互斥、按皮肤归属；脚本对每个目录逐层探测，存在的层才生成任务)
+  (三个目录互斥，归属由官方皮肤配置 speciaSkin 表决定，配置不可用时逐层探测兜底)
   OL武将形象(完整人物+攻击/技能/互动动画 xingxiang，多数动皮皮肤都有):
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffect{Big,New}/{id}/xingxiang.json
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/dynamic/{id}/xingxiang.json
@@ -33,12 +33,14 @@
 
 说明:
   - 全程无登录、无模拟浏览器，纯 HTTP 静态资源下载（CDN 无鉴权，已实测）
-  - OL动皮目录存在 skinEffectBig / skinEffectNew / general/big/dynamic 三个变体，逐层探测，不存在的文件不产生任务
-  - atlas 下载后自动解析其引用的贴图页并补全缺失的多页图集（如 xingxiang_2~_5.png）
+  - 皮肤目录按官方配置 cha_gs_dbs_fs_skininfo.json 的 speciaSkin 表决定：
+    isNewEffect=1 -> skinEffectBig；表内其他 -> skinEffectNew；不在表 -> general/big/dynamic
+  - 多状态皮肤（如 58603_1/_2/_3）自动展开下载；配置每日自动更新，失败回退全目录逐层探测
   - 已存在的文件自动跳过；失败自动重试 3 次；按 Content-Length 校验完整性
   - 动皮是骨骼动画不是视频，需本地播放器渲染；社区参考: LayaAir IDE + OBS 录屏
 """
 import argparse
+import io
 import json
 import re
 import sys
@@ -46,6 +48,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -68,8 +71,12 @@ SKEL_EXT = (".sk", ".skel", ".atlas")
 
 OL_RE = re.compile(
     r"/220/h5_2/res/runtime/pc/(?:animate/(?:skinEffectBig|skinEffectNew)|general/big/dynamic)"
-    r"/(\d+)/([\w.\-]+)$", re.I)
+    r"/(\d+(?:_\d+)*)/([\w.\-]+)$", re.I)
 STATIC_RE = re.compile(r"general/big/static/(\d+)\.png$", re.I)
+
+CFG_LAYAMD5 = "https://web.sanguosha.com/220/miniGame/release/cfg/layamd5.json"
+CFG_BUNDLE = "https://web.sanguosha.com/220/miniGame/release/cfg/laya_json_release.cfg"
+CFG_SKIN_FILE = "cha_gs_dbs_fs_skininfo.json"
 
 
 def http_get(url, timeout=30):
@@ -167,7 +174,7 @@ def read_ids(path):
             continue
         for tok in re.split(r"[,\s]+", line):
             tok = tok.strip("\ufeff")
-            if tok.isdigit():
+            if re.fullmatch(r"\d+(?:_\d+)*", tok):
                 ids.append(tok)
     return ids
 
@@ -208,6 +215,73 @@ def atlas_pages(path):
     except OSError:
         pass
     return pages
+
+
+def load_skin_config(cache_path=None):
+    """加载游戏皮肤配置表（speciaSkin），返回 {skinID: entry}。
+
+    - 每次运行自动拉取最新配置（layamd5.json 取版本号防缓存），当日复用本地缓存
+    - 缓存位置默认 {out}/.cache/skin_info.json
+    - 任何失败返回 None（调用方回退逐层探测，不影响下载）
+    """
+    cache = Path(cache_path) if cache_path else Path("output") / ".cache" / "skin_info.json"
+    today = time.strftime("%Y-%m-%d")
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("date") == today and isinstance(data.get("specia_skins"), dict):
+                return data["specia_skins"]
+        except Exception:
+            pass
+    try:
+        version = None
+        try:
+            req = urllib.request.Request(CFG_LAYAMD5, headers={"User-Agent": UA})
+            raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
+            version = (json.loads(raw) or {}).get("hash")
+        except Exception:
+            pass
+        url = CFG_BUNDLE + (("?v=" + version) if version else "")
+        data = http_get(url, timeout=60).read()
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        obj = json.loads(zf.read(CFG_SKIN_FILE).decode("utf-8"))
+        specia = obj["generalskin"]["speciaSkin"]
+        spec = {str(e["skinID"]): e for e in specia if e.get("skinID")}
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"date": today, "specia_skins": spec},
+                                    ensure_ascii=False), encoding="utf-8")
+        return spec
+    except Exception:
+        return None
+
+
+def skin_targets(sid, specia):
+    """按配置决定该皮肤的下载目标 [(状态ID, 目录基址)]。
+
+    - 表内有 {sid}_1/_2/_3 条目 -> 多状态皮肤，只展开各状态（与游戏一致）
+    - 条目 isNewEffect=1 -> skinEffectBig；有条目 -> skinEffectNew；无条目 -> general/big/dynamic
+    - 配置不可用返回 None（调用方回退全目录探测）
+    """
+    if specia is None:
+        return None
+    states = []
+    for i in (1, 2, 3):
+        k = "%s_%d" % (sid, i)
+        if k in specia:
+            states.append(k)
+    if not states:
+        states = [sid]
+    targets = []
+    for st in states:
+        e = specia.get(st)
+        if e and e.get("isNewEffect") == 1:
+            base = OL_BASES[0]
+        elif e:
+            base = OL_BASES[1]
+        else:
+            base = OL_BASES[2]
+        targets.append((st, base))
+    return targets
 
 
 def collect_tasks(har_files=None, ids_files=None, urls_files=None,
@@ -255,17 +329,26 @@ def collect_tasks(har_files=None, ids_files=None, urls_files=None,
         log("[URLS] %s -> %d 个" % (fp, len(urls)))
         videos.extend(urls)
 
+    specia = load_skin_config(out / ".cache" / "skin_info.json")
+    if specia is not None:
+        log("[CFG] 皮肤配置 %d 条（自动拉取，目录/多状态按配置展开）" % len(specia))
+    else:
+        log("[CFG] 配置不可用，回退全目录逐层探测")
+
     tasks = []  # (url, dest)
     seen = set()
     for sid in sorted(ol_ids):
-        folder = skin_dir / sid
-        for base in OL_BASES:
+        targets = skin_targets(sid, specia)
+        if targets is None:
+            targets = [(sid, base) for base in OL_BASES]
+        for st, base in targets:
+            folder = skin_dir / st
             found = False
             for name in OL_NAMES:
-                if not probe(base + "/%s/%s.json" % (sid, name)):
+                if not probe(base + "/%s/%s.json" % (st, name)):
                     continue
                 found = True
-                has_hd = probe(base + "/%s/%s_2.png" % (sid, name))
+                has_hd = probe(base + "/%s/%s_2.png" % (st, name))
                 for suf in OL_SUFFIXES:
                     if suf == "_2.png" and not has_hd:
                         continue
@@ -273,15 +356,15 @@ def collect_tasks(har_files=None, ids_files=None, urls_files=None,
                     dest = folder / fn
                     if str(dest) not in seen:
                         seen.add(str(dest))
-                        tasks.append((base + "/%s/%s" % (sid, fn), dest))
+                        tasks.append((base + "/%s/%s" % (st, fn), dest))
             if not found:
                 continue
-            if probe(base + "/%s/xingxiang.json" % sid):
+            if probe(base + "/%s/xingxiang.json" % st):
                 for fn in XINGXIANG_FILES:
                     dest = folder / fn
                     if str(dest) not in seen:
                         seen.add(str(dest))
-                        tasks.append((base + "/%s/%s" % (sid, fn), dest))
+                        tasks.append((base + "/%s/%s" % (st, fn), dest))
     if not no_static:
         for sid in sorted(static_ids):
             tasks.append((OL_STATIC_BASE + "/%s.png" % sid,

@@ -7,3 +7,6 @@ __pycache__/
 
 # 下载残留的临时分片文件
 *.part
+
+# note
+note.txt

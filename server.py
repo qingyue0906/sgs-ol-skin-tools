@@ -198,7 +198,7 @@ class Handler(SimpleHTTPRequestHandler):
                         skins.append(d.name)
             self._json({"skins": skins})
             return
-        m = re.match(r"^/api/skin/(\d+)$", path)
+        m = re.match(r"^/api/skin/([0-9_]+)$", path)
         if m:
             d = SKINS / m.group(1)
             files = sorted(p.name for p in d.iterdir() if p.is_file()) if d.is_dir() else []
