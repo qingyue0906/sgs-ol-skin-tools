@@ -16,6 +16,7 @@ let layers = [];        // {name, skeletonData, skeleton, state, enabled, animNa
 let skinIds = [], cur = -1;
 let speed = 1, looping = true, playing = true, zoomMul = 1, loadSeq = 0;
 let pan = { x: 0, y: 0 };   // 相对适配中心的偏移（CSS 像素）
+let fpsLimit = 60, lastFrame = 0;
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 function showMsg(s) { msgEl.textContent = s; msgEl.style.display = "block"; }
@@ -288,6 +289,14 @@ function highlightList() {
 function tick(now) {
   requestAnimationFrame(tick);
   if (!renderer || !layers.length) return;
+  const interval = fpsLimit > 0 ? 1000 / fpsLimit : 0;
+  if (interval) {
+    if (now - lastFrame < interval) return;
+    // 重同步到最近的帧间隔整数倍，避免高刷屏下帧率漂移（如 144Hz 屏限 60 帧掉到 48）
+    lastFrame += Math.floor((now - lastFrame) / interval) * interval;
+  } else {
+    lastFrame = now;
+  }
   resizeCanvas();
   const dt = Math.min(0.1, (now - (tick._last || now)) / 1000) * speed;
   tick._last = now;
@@ -316,6 +325,10 @@ document.getElementById("btnPlay").addEventListener("click", () => {
 document.getElementById("speed").addEventListener("input", e => {
   speed = parseInt(e.target.value, 10) / 100;
   document.getElementById("speedVal").textContent = speed.toFixed(2) + "x";
+});
+document.getElementById("fps").addEventListener("input", e => {
+  let v = parseInt(e.target.value, 10);
+  fpsLimit = (isNaN(v) || v < 0) ? 60 : Math.min(240, v);
 });
 document.getElementById("loop").addEventListener("change", e => {
   looping = e.target.checked;
