@@ -15,6 +15,7 @@ let context = null, renderer = null, am = null;
 let layers = [];        // {name, skeletonData, skeleton, state, enabled, animNames}
 let skinIds = [], cur = -1;
 let speed = 1, looping = true, playing = true, zoomMul = 1, loadSeq = 0;
+let pan = { x: 0, y: 0 };   // 相对适配中心的偏移（CSS 像素）
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 function showMsg(s) { msgEl.textContent = s; msgEl.style.display = "block"; }
@@ -92,8 +93,13 @@ function computeLayerBounds(l) {
   l.bounds = isFinite(minX) ? { minX, minY, maxX, maxY } : null;
 }
 
-function fit() {
+function zoomLabel() {
+  return Math.round(100 / zoomMul) + "%";
+}
+
+function applyCamera() {
   if (!renderer || !layers.length) return;
+  zoomMul = Math.min(50, Math.max(0.1, zoomMul));
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const l of layers) {
     if (!l.bounds) continue;
@@ -103,11 +109,54 @@ function fit() {
   if (!isFinite(minX)) return;
   const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-  const vw = Math.max(1, canvas.width), vh = Math.max(1, canvas.height);
-  const zoom = 1 / (Math.min(vw / w, vh / h) * 0.94 * zoomMul);
-  renderer.camera.position.set(cx, cy, 0);
+  const zoom = 1 / (Math.min(canvas.width / w, canvas.height / h) * 0.94 * zoomMul);
+  const scale = canvas.width / Math.max(1, canvas.clientWidth);  // 设备像素 / CSS 像素
+  renderer.camera.position.set(cx + pan.x * zoom * scale, cy - pan.y * zoom * scale, 0);
   renderer.camera.zoom = zoom;
+  const lbl = document.getElementById("zoomVal");
+  if (lbl) lbl.textContent = "缩放 " + zoomLabel();
 }
+
+function fit() { applyCamera(); }
+
+function zoomAt(mx, my, f) {
+  const next = zoomMul * f;
+  if (next < 0.1 || next > 50) return;
+  const cw = Math.max(1, canvas.clientWidth), ch = Math.max(1, canvas.clientHeight);
+  pan.x = f * pan.x + (f - 1) * (mx - cw / 2);
+  pan.y = f * pan.y - (f - 1) * (ch / 2 - my);
+  zoomMul = next;
+  applyCamera();
+}
+
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+}, { passive: false });
+
+let dragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener("pointerdown", e => {
+  if (e.button !== 0) return;
+  dragging = true;
+  lastX = e.clientX; lastY = e.clientY;
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+});
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  pan.x -= e.clientX - lastX;
+  pan.y -= e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyCamera();
+});
+canvas.addEventListener("pointerup", () => { dragging = false; });
+canvas.addEventListener("pointercancel", () => { dragging = false; });
+
+canvas.addEventListener("dblclick", () => {
+  zoomMul = 1;
+  pan.x = 0; pan.y = 0;
+  applyCamera();
+});
 
 function applyLayerAnim(l, doFit = true) {
   const sel = document.querySelector('.layerAnim[data-layer="' + l.name + '"]');
@@ -178,6 +227,7 @@ function loadSkin(i) {
   const id = skinIds[i];
   const seq = ++loadSeq;
   zoomMul = 1;
+  pan.x = 0; pan.y = 0;
   skinNameEl.textContent = id + "（" + (i + 1) + "/" + skinIds.length + "）";
   highlightList();
   hideMsg();
