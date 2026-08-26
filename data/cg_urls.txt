@@ -1,0 +1,3 @@
+# CG 视频直链清单（每行一个，可含 ?参数，# 为注释）
+# 已在登录页背景视频 API 中验证可下载
+https://wwwoss.sanguosha.com/uploads/video/202608/8gx7yniSXPxz6Fdk.mp4

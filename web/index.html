@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>三国杀OL 资源工具</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="title">三国杀OL 资源工具</span>
+  <nav>
+    <button id="tabDownload" class="tab active">下载</button>
+    <button id="tabPlayer" class="tab">播放器</button>
+  </nav>
+</header>
+
+<div id="dlPanel" class="panel">
+  <div id="dlForm">
+    <div>
+      <label class="fld">皮肤 ID（每行一个，逗号/空格分隔，# 开头为注释）</label>
+      <textarea id="idsText" placeholder="74002&#10;75201"></textarea>
+    </div>
+    <div>
+      <label class="fld">URL 清单（每行一个直链，# 开头为注释，用于 CG 视频等）</label>
+      <textarea id="urlsText" placeholder="https://wwwoss.sanguosha.com/uploads/video/xxxx.mp4"></textarea>
+    </div>
+    <div class="row">
+      <label>HAR 文件 <input type="file" id="harFile" accept=".har,application/json"></label>
+      <label>并发 <input type="number" id="workers" value="4" min="1" max="16"></label>
+      <label><input type="checkbox" id="noStatic">不下载静皮大图</label>
+      <label><input type="checkbox" id="skels">下载骨骼特效(需HAR)</label>
+    </div>
+    <div class="row">
+      <button id="btnStart" class="primary">开始下载</button>
+      <button id="btnStop" class="danger" disabled>停止</button>
+      <span id="dlStatus"></span>
+      <progress id="dlProgress" max="100" value="0" hidden></progress>
+    </div>
+  </div>
+  <div id="dlLog"><span class="info">等待开始下载...</span></div>
+</div>
+
+<div id="playerPanel" class="panel hidden">
+  <div id="playerTop">
+    <button id="btnPrev">◀ 上一个</button>
+    <span id="skinName">加载中...</span>
+    <button id="btnNext">下一个 ▶</button>
+    <span id="status"></span>
+  </div>
+  <div id="layout">
+    <div id="side">
+      <h3>皮肤列表</h3>
+      <ul id="skinList"></ul>
+    </div>
+    <div id="main">
+      <canvas id="glCanvas"></canvas>
+      <div id="msg"></div>
+    </div>
+  </div>
+  <footer>
+    <button id="btnPlay">暂停</button>
+    <label>速度 <input id="speed" type="range" min="25" max="400" value="100"></label>
+    <span id="speedVal">1.0x</span>
+    <label><input id="loop" type="checkbox" checked>循环</label>
+    <button id="btnShot">截图</button>
+    <button id="btnZoomIn">放大</button>
+    <button id="btnZoomOut">缩小</button>
+    <span id="layerControls"></span>
+  </footer>
+</div>
+
+<script src="spine-webgl.js"></script>
+<script src="player.js"></script>
+<script src="downloader.js"></script>
+<script>
+"use strict";
+const tabDownload = document.getElementById("tabDownload");
+const tabPlayer = document.getElementById("tabPlayer");
+const dlPanel = document.getElementById("dlPanel");
+const playerPanel = document.getElementById("playerPanel");
+function showTab(which) {
+  const dl = which === "download";
+  tabDownload.classList.toggle("active", dl);
+  tabPlayer.classList.toggle("active", !dl);
+  dlPanel.classList.toggle("hidden", !dl);
+  playerPanel.classList.toggle("hidden", dl);
+  if (!dl) window.dispatchEvent(new Event("resize"));
+}
+tabDownload.addEventListener("click", () => showTab("download"));
+tabPlayer.addEventListener("click", () => showTab("player"));
+</script>
+</body>
+</html>
