@@ -159,6 +159,183 @@ canvas.addEventListener("dblclick", () => {
   applyCamera();
 });
 
+// ---- 纹理查看工具（鼠标位置 -> 对应纹理位置）----
+let texToolOn = false;
+let texHits = [];   // [{layer, slot, att, page, pageW, pageH, u, v, u2, v2, wx, wy}]
+let texSel = -1;
+const texPanel = document.getElementById("texPanel");
+const texHitsEl = document.getElementById("texHits");
+const texDetailEl = document.getElementById("texDetail");
+
+function worldAtMouse(mx, my) {
+  if (!renderer || !layers.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const l of layers) {
+    if (!l.bounds) continue;
+    minX = Math.min(minX, l.bounds.minX); minY = Math.min(minY, l.bounds.minY);
+    maxX = Math.max(maxX, l.bounds.maxX); maxY = Math.max(maxY, l.bounds.maxY);
+  }
+  if (!isFinite(minX)) return null;
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const z = 1 / (Math.min(canvas.width / w, canvas.height / h) * 0.94 * zoomMul);
+  const scale = canvas.width / Math.max(1, canvas.clientWidth);
+  const cw = Math.max(1, canvas.clientWidth), ch = Math.max(1, canvas.clientHeight);
+  return { x: cx + z * scale * (pan.x + mx - cw / 2),
+           y: cy + z * scale * (ch / 2 - my - pan.y) };
+}
+
+function pointInTri(px, py, ax, ay, bx, by, cx, cy) {
+  const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+  const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+  const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
+
+function triBary(px, py, ax, ay, bx, by, cx, cy) {
+  const v0x = cx - ax, v0y = cy - ay, v1x = bx - ax, v1y = by - ay, v2x = px - ax, v2y = py - ay;
+  const dot00 = v0x * v0x + v0y * v0y, dot01 = v0x * v1x + v0y * v1y;
+  const dot02 = v0x * v2x + v0y * v2y, dot11 = v1x * v1x + v1y * v1y, dot12 = v1x * v2x + v1y * v2y;
+  const inv = 1 / (dot00 * dot11 - dot01 * dot01);
+  return [(dot11 * dot02 - dot01 * dot12) * inv, (dot00 * dot12 - dot01 * dot02) * inv];
+}
+
+function hitLayer(l, wx, wy) {
+  const slots = l.skeleton.slots;
+  let scratch = null;
+  for (let si = slots.length - 1; si >= 0; si--) {
+    const slot = slots[si];
+    const att = slot.getAttachment();
+    if (!att || !att.region || !att.region.page) continue;
+    let verts, tris, uvs;
+    if (att.offset) {                       // RegionAttachment
+      att.updateRegion();
+      verts = new Float32Array(8);
+      att.computeWorldVertices(slot, verts, 0, 2);
+      tris = [0, 1, 2, 2, 3, 0];
+      uvs = att.uvs;
+    } else if (att.triangles) {             // MeshAttachment
+      att.updateRegion();
+      const n = att.worldVerticesLength;
+      if (!scratch || scratch.length < n) scratch = new Float32Array(Math.max(256, n));
+      verts = scratch;
+      att.computeWorldVertices(slot, 0, n, verts, 0, 2);
+      tris = att.triangles;
+      uvs = att.uvs;
+    } else continue;
+    for (let t = 0; t < tris.length; t += 3) {
+      const i0 = tris[t] * 2, i1 = tris[t + 1] * 2, i2 = tris[t + 2] * 2;
+      const ax = verts[i0], ay = verts[i0 + 1], bx = verts[i1], by = verts[i1 + 1],
+            cx = verts[i2], cy = verts[i2 + 1];
+      if (!pointInTri(wx, wy, ax, ay, bx, by, cx, cy)) continue;
+      const bc = triBary(wx, wy, ax, ay, bx, by, cx, cy);
+      const u = (1 - bc[0] - bc[1]) * uvs[i0] + bc[0] * uvs[i1] + bc[1] * uvs[i2];
+      const v = (1 - bc[0] - bc[1]) * uvs[i0 + 1] + bc[0] * uvs[i1 + 1] + bc[1] * uvs[i2 + 1];
+      const page = att.region.page;
+      let uMin = Infinity, vMin = Infinity, uMax = -Infinity, vMax = -Infinity;
+      for (let k = 0; k < uvs.length; k += 2) {
+        uMin = Math.min(uMin, uvs[k]); uMax = Math.max(uMax, uvs[k]);
+        vMin = Math.min(vMin, uvs[k + 1]); vMax = Math.max(vMax, uvs[k + 1]);
+      }
+      return { layer: l, slot: slot.data.name, att: att.name,
+               page: page.name, pageW: page.width, pageH: page.height,
+               u: u, v: v, u2: uMax, v2: vMax, wx: wx, wy: wy };
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener("mousemove", e => {
+  if (!texToolOn || !layers.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const w = worldAtMouse(e.clientX - rect.left, e.clientY - rect.top);
+  const hits = [];
+  if (w) {
+    for (const l of layers) {
+      if (!l.enabled) continue;
+      const hit = hitLayer(l, w.x, w.y);
+      if (hit) hits.push(hit);
+    }
+  }
+  texHits = hits;
+  texSel = texHits.length ? texHits.length - 1 : -1;
+  renderTexPanel();
+});
+
+function renderTexPanel() {
+  if (!texToolOn) return;
+  const h = texHits[texSel] || null;
+  const key = h ? h.layer.name + "|" + h.slot + "|" + h.att : "";
+  if (key !== texHitsEl._key) {
+    texHitsEl.innerHTML = "";
+    texHits.forEach((hit, i) => {
+      const b = document.createElement("button");
+      b.className = i === texSel ? "active" : "";
+      b.textContent = LAYER_LABEL[hit.layer.name] + " · " + hit.slot + " · " + hit.att;
+      b.addEventListener("click", () => { texSel = i; renderTexPanel(); });
+      texHitsEl.appendChild(b);
+    });
+    texHitsEl._key = key;
+  }
+  if (!h) {
+    texDetailEl.innerHTML = '<div class="tex-empty">未命中纹理<br>鼠标移到皮肤上查看</div>';
+    texDetailEl._src = null;
+    return;
+  }
+  const src = "/output/skins/" + skinIds[cur] + "/" + h.page;
+  if (texDetailEl._src !== src) {
+    texDetailEl.innerHTML =
+      '<div class="tex-label">贴图页 ' + h.page + '（' + h.pageW + 'x' + h.pageH + '）</div>' +
+      '<div id="texPageWrap"><img id="texPageImg" alt=""><span id="texCross"></span></div>' +
+      '<div class="tex-label">区域裁剪放大</div><canvas id="texCrop"></canvas>' +
+      '<div class="tex-label">信息</div><div class="tex-info"></div>';
+    texDetailEl._src = src;
+  }
+  const img = document.getElementById("texPageImg");
+  const cross = document.getElementById("texCross");
+  const crop = document.getElementById("texCrop");
+  const info = texDetailEl.querySelector(".tex-info");
+  if (img.src !== src) img.src = src;
+  cross.style.left = (h.u * 100).toFixed(2) + "%";
+  cross.style.top = (h.v * 100).toFixed(2) + "%";
+  if (img.complete && img.naturalWidth) drawCrop(crop, img, h);
+  else img.onload = () => drawCrop(crop, img, h);
+  info.innerHTML =
+    "<b>层:</b> " + LAYER_LABEL[h.layer.name] + "（" + h.layer.name + "）<br>" +
+    "<b>槽位:</b> " + h.slot + "<br>" +
+    "<b>附件:</b> " + h.att + "<br>" +
+    "<b>贴图页:</b> " + h.page + "<br>" +
+    "<b>UV:</b> (" + h.u.toFixed(4) + ", " + h.v.toFixed(4) + ")<br>" +
+    "<b>像素:</b> (" + Math.round(h.u * h.pageW) + ", " + Math.round(h.v * h.pageH) + ")<br>" +
+    "<b>世界坐标:</b> (" + h.wx.toFixed(1) + ", " + h.wy.toFixed(1) + ")";
+}
+
+function drawCrop(crop, img, h) {
+  const nw = img.naturalWidth || 1, nh = img.naturalHeight || 1;
+  const sx = h.u * nw, sy = h.v * nh;
+  const sw = Math.max(1, (h.u2 - h.u) * nw), sh = Math.max(1, (h.v2 - h.v) * nh);
+  const scale = Math.min(1, 260 / sw);
+  crop.width = Math.max(1, Math.round(sw * scale));
+  crop.height = Math.max(1, Math.round(sh * scale));
+  const ctx = crop.getContext("2d");
+  ctx.clearRect(0, 0, crop.width, crop.height);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+  crop.style.imageRendering = scale < 1 ? "" : "pixelated";
+}
+
+document.getElementById("btnTex").addEventListener("click", () => {
+  texToolOn = !texToolOn;
+  texPanel.classList.toggle("hidden", !texToolOn);
+  document.getElementById("btnTex").classList.toggle("active", texToolOn);
+  if (!texToolOn) {
+    texHits = []; texSel = -1;
+    texHitsEl._key = null; texDetailEl._src = null;
+  }
+  renderTexPanel();
+});
+
 function applyLayerAnim(l, doFit = true) {
   const sel = document.querySelector('.layerAnim[data-layer="' + l.name + '"]');
   const name = sel && sel.value ? sel.value : (l.animNames.length ? l.animNames[0] : null);
@@ -229,6 +406,8 @@ function loadSkin(i) {
   const seq = ++loadSeq;
   zoomMul = 1;
   pan.x = 0; pan.y = 0;
+  texHits = []; texSel = -1;
+  if (texHitsEl) { texHitsEl._key = null; texDetailEl._src = null; }
   skinNameEl.textContent = id + "（" + (i + 1) + "/" + skinIds.length + "）";
   highlightList();
   hideMsg();

@@ -59,9 +59,14 @@
       <canvas id="glCanvas"></canvas>
       <div id="msg"></div>
     </div>
+    <div id="texPanel" class="hidden">
+      <div id="texHits"></div>
+      <div id="texDetail"></div>
+    </div>
   </div>
   <footer>
     <button id="btnPlay">暂停</button>
+    <button id="btnTex">纹理查看</button>
     <label>速度 <input id="speed" type="range" min="25" max="400" value="100"></label>
     <span id="speedVal">1.0x</span>
     <label title="0 = 不限制">帧率 <input id="fps" type="number" min="0" max="240" value="60"></label>
