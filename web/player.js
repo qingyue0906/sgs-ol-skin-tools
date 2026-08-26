@@ -17,6 +17,7 @@ let skinIds = [], cur = -1;
 let speed = 1, looping = true, playing = true, zoomMul = 1, loadSeq = 0;
 let pan = { x: 0, y: 0 };   // 相对适配中心的偏移（CSS 像素）
 let fpsLimit = 60, lastFrame = 0;
+let playMode = "auto";      // auto=出场→待机循环 / chu=全部出场循环 / daiji=全部待机循环
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 function showMsg(s) { msgEl.textContent = s; msgEl.style.display = "block"; }
@@ -347,6 +348,39 @@ function applyLayerAnim(l, doFit = true) {
   if (doFit) fit();
 }
 
+function animExists(l, name) {
+  return l.animNames.includes(name);
+}
+
+function setLayerAnim(l, name, loop) {
+  l.state.setAnimation(0, name, loop);
+  l.curAnim = name;
+}
+
+function applyPlayMode() {
+  // 全局播放模式：有对应动画的层切换，其余层保持不动
+  for (const l of layers) {
+    if (playMode === "chu") {
+      if (animExists(l, "ChuChang")) setLayerAnim(l, "ChuChang", true);
+    } else if (playMode === "daiji") {
+      if (animExists(l, "DaiJi")) setLayerAnim(l, "DaiJi", true);
+    } else if (playMode === "auto") {
+      if (animExists(l, "ChuChang")) setLayerAnim(l, "ChuChang", false);
+    }
+  }
+}
+
+function autoAdvance(l) {
+  // 自动模式：出场动画播完自动切换待机循环；待机播完且未勾选循环则停在末帧
+  if (playMode !== "auto") return;
+  const e = l.state.getCurrent(0);
+  if (!e || e.loop) return;
+  if (e.trackTime < (e.animationEnd || 0) - 0.001) return;
+  if (l.curAnim === "DaiJi") return;
+  if (animExists(l, "DaiJi")) setLayerAnim(l, "DaiJi", looping);
+  else if (l.animNames.length) setLayerAnim(l, l.animNames[0], looping);
+}
+
 function buildLayerControls() {
   layerCtrlsEl.innerHTML = "";
   for (const l of layers) {
@@ -387,13 +421,15 @@ function buildLayers(id, names) {
     const st = new spine.AnimationState(new spine.AnimationStateData(sd));
     layers.push({
       name: n, skeletonData: sd, skeleton: sk, state: st,
-      enabled: !!LAYER_DEFAULT_ON[n],
+      // 四层型（有 daiji）形象默认关；beijing+形象型（无 daiji）形象默认开
+      enabled: n === "xingxiang" ? !names.includes("daiji") : !!LAYER_DEFAULT_ON[n],
       animNames: sd.animations.map(a => a.name), curAnim: null, bounds: null
     });
   }
   layers.sort((a, b) => LAYER_NAMES.indexOf(a.name) - LAYER_NAMES.indexOf(b.name));
   buildLayerControls();
   for (const l of layers) applyLayerAnim(l, false);
+  applyPlayMode();
   resizeCanvas();
   fit();
   setStatus("已加载 " + id);
@@ -404,6 +440,9 @@ function loadSkin(i) {
   cur = i;
   const id = skinIds[i];
   const seq = ++loadSeq;
+  playMode = "auto";
+  const pmSel = document.getElementById("playModeSel");
+  if (pmSel) pmSel.value = "auto";
   zoomMul = 1;
   pan.x = 0; pan.y = 0;
   texHits = []; texSel = -1;
@@ -483,6 +522,7 @@ function tick(now) {
     for (const l of layers) {
       if (!l.enabled) continue;
       l.state.update(dt);
+      autoAdvance(l);
       l.state.apply(l.skeleton);
       l.skeleton.updateWorldTransform();
     }
@@ -511,7 +551,11 @@ document.getElementById("fps").addEventListener("input", e => {
 });
 document.getElementById("loop").addEventListener("change", e => {
   looping = e.target.checked;
-  for (const l of layers) applyLayerAnim(l);
+  applyPlayMode();
+});
+document.getElementById("playModeSel").addEventListener("change", e => {
+  playMode = e.target.value;
+  applyPlayMode();
 });
 document.getElementById("btnShot").addEventListener("click", () => {
   if (!layers.length) return;

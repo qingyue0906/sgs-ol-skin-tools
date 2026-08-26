@@ -71,6 +71,13 @@
     <span id="speedVal">1.0x</span>
     <label title="0 = 不限制">帧率 <input id="fps" type="number" min="0" max="240" value="60"></label>
     <label><input id="loop" type="checkbox" checked>循环</label>
+    <label>播放模式
+      <select id="playModeSel">
+        <option value="auto" selected>自动（出场→待机）</option>
+        <option value="chu">全部出场</option>
+        <option value="daiji">全部待机</option>
+      </select>
+    </label>
     <button id="btnShot">截图</button>
     <button id="btnZoomIn">放大</button>
     <button id="btnZoomOut">缩小</button>
