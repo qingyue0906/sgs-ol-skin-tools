@@ -30,6 +30,7 @@ import grabber
 
 ROOT = Path(__file__).resolve().parent
 SKINS = ROOT / "output" / "skins"
+PLAYABLE_LAYERS = ["daiji", "beijing", "qianjing", "xingxiang"]
 MAX_LOG = 500
 
 
@@ -191,7 +192,9 @@ class Handler(SimpleHTTPRequestHandler):
             skins = []
             if SKINS.is_dir():
                 for d in sorted(SKINS.iterdir()):
-                    if d.is_dir() and (d / "daiji.json").exists():
+                    if d.is_dir() and any(
+                            (d / (n + ".json")).exists() and (d / (n + ".atlas")).exists()
+                            for n in PLAYABLE_LAYERS):
                         skins.append(d.name)
             self._json({"skins": skins})
             return

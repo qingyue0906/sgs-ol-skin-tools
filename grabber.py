@@ -19,21 +19,21 @@
   output/cg/              CG 视频
   output/extra/           --skels 抓到的其他骨骼文件
 
-资源规律（均已实测验证）:
-  OL互通版动皮(Spine JSON 三层 daiji/beijing/qianjing，含 _2 高清变体):
+资源规律（均已实测验证，纯 OL 互通版）:
+  OL动皮(Spine JSON，文件布局因皮肤而异，常见 daiji/beijing/qianjing 三层，含 _2 高清变体):
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectBig/{id}/
-  OL互通版动皮(新目录变体 skinEffectNew，无 _2 高清变体; 新老皮肤分属不同目录，脚本自动探测):
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectNew/{id}/
-  OL互通版武将形象(完整人物+攻击/技能/互动动画 xingxiang，多数动皮皮肤都有，同样按目录探测):
+    https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/dynamic/{id}/
+  (三个目录互斥、按皮肤归属；脚本对每个目录逐层探测，存在的层才生成任务)
+  OL武将形象(完整人物+攻击/技能/互动动画 xingxiang，多数动皮皮肤都有):
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffect{Big,New}/{id}/xingxiang.json
-  OL互通版静皮大图:
+    https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/dynamic/{id}/xingxiang.json
+  OL静皮大图:
     https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/static/{id}.png
-  十周年动皮(旧格式 LayaAir .sk / Spine .skel):
-    https://web.sanguosha.com/10/pc/res/assets/runtime/general/big/dynamic/{id}/
 
 说明:
   - 全程无登录、无模拟浏览器，纯 HTTP 静态资源下载（CDN 无鉴权，已实测）
-  - OL动皮目录存在 skinEffectBig / skinEffectNew 两个变体，按 ID 探测哪个存在再下载，404 的目录不产生任务
+  - OL动皮目录存在 skinEffectBig / skinEffectNew / general/big/dynamic 三个变体，逐层探测，不存在的文件不产生任务
   - atlas 下载后自动解析其引用的贴图页并补全缺失的多页图集（如 xingxiang_2~_5.png）
   - 已存在的文件自动跳过；失败自动重试 3 次；按 Content-Length 校验完整性
   - 动皮是骨骼动画不是视频，需本地播放器渲染；社区参考: LayaAir IDE + OBS 录屏
@@ -55,23 +55,20 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 OL_BASES = [
     "https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectBig",
     "https://web.sanguosha.com/220/h5_2/res/runtime/pc/animate/skinEffectNew",
+    "https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/dynamic",
 ]
 OL_STATIC_BASE = "https://web.sanguosha.com/220/h5_2/res/runtime/pc/general/big/static"
-TH_BASE = "https://web.sanguosha.com/10/pc/res/assets/runtime/general/big/dynamic"
 
 OL_NAMES = ["daiji", "beijing", "qianjing"]
 OL_SUFFIXES = [".json", ".atlas", ".png", "_2.png"]
 XINGXIANG_FILES = ["xingxiang.json", "xingxiang.atlas", "xingxiang.png"]
 OL_KNOWN_FILES = {n + s for n in OL_NAMES for s in OL_SUFFIXES} | set(XINGXIANG_FILES)
-TH_FILES = [
-    "daiji.sk", "beijing.sk", "daiji.png", "beijing.png",
-    "daiji.skel", "beijing.skel", "daiji.atlas", "beijing.atlas",
-]
 VIDEO_EXT = (".mp4", ".webm", ".flv", ".mov", ".m4v", ".ts")
 SKEL_EXT = (".sk", ".skel", ".atlas")
 
-OL_RE = re.compile(r"animate/(?:skinEffectBig|skinEffectNew)/(\d+)/([\w.\-]+)$", re.I)
-TH_RE = re.compile(r"general/big/dynamic/(\d+)/([\w.\-]+)$", re.I)
+OL_RE = re.compile(
+    r"/220/h5_2/res/runtime/pc/(?:animate/(?:skinEffectBig|skinEffectNew)|general/big/dynamic)"
+    r"/(\d+)/([\w.\-]+)$", re.I)
 STATIC_RE = re.compile(r"general/big/static/(\d+)\.png$", re.I)
 
 
@@ -131,7 +128,7 @@ def download_one(url, dest, retries=3):
 def parse_har(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     entries = data.get("log", {}).get("entries", [])
-    ol_ids, th_ids, static_ids = set(), set(), set()
+    ol_ids, static_ids = set(), set()
     extras, videos, skels = {}, [], []
     seen_v = set()
     for e in entries:
@@ -144,13 +141,6 @@ def parse_har(path):
             sid, fn = m.group(1), m.group(2)
             ol_ids.add(sid)
             if fn not in OL_KNOWN_FILES:
-                extras.setdefault(sid, []).append(url)
-            continue
-        m = TH_RE.search(url)
-        if m:
-            sid, fn = m.group(1), m.group(2)
-            th_ids.add(sid)
-            if fn not in TH_FILES:
                 extras.setdefault(sid, []).append(url)
             continue
         m = STATIC_RE.search(url)
@@ -166,16 +156,17 @@ def parse_har(path):
                 videos.append(url)
         elif low.endswith(SKEL_EXT):
             skels.append(url)
-    return sorted(ol_ids), sorted(th_ids), sorted(static_ids), extras, videos, skels
+    return sorted(ol_ids), sorted(static_ids), extras, videos, skels
 
 
 def read_ids(path):
     ids = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+        line = line.strip().lstrip("\ufeff")
         if not line or line.startswith("#"):
             continue
         for tok in re.split(r"[,\s]+", line):
+            tok = tok.strip("\ufeff")
             if tok.isdigit():
                 ids.append(tok)
     return ids
@@ -185,7 +176,7 @@ def read_urls(path):
     urls = []
     seen = set()
     for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+        line = line.strip().lstrip("\ufeff")
         if not line or line.startswith("#"):
             continue
         url = line.split("#")[0].strip()
@@ -229,20 +220,19 @@ def collect_tasks(har_files=None, ids_files=None, urls_files=None,
     out = Path(out_dir)
     skin_dir, cg_dir, extra_dir = out / "skins", out / "cg", out / "extra"
 
-    ol_ids, th_ids, static_ids = set(), set(), set()
+    ol_ids, static_ids = set(), set()
     extras, videos, skels_list = {}, [], []
 
     for hp in har_files or []:
         try:
-            h_ol, h_th, h_st, h_ex, h_vid, h_skel = parse_har(hp)
+            h_ol, h_st, h_ex, h_vid, h_skel = parse_har(hp)
         except Exception as exc:
             log("[HAR] 解析失败 %s: %s" % (hp, exc))
             continue
-        log("[HAR] %s -> OL动皮 %d 个, 十周年动皮 %d 个, 静皮 %d 个, CG视频 %d 个%s"
-            % (hp, len(h_ol), len(h_th), len(h_st), len(h_vid),
+        log("[HAR] %s -> 动皮 %d 个, 静皮 %d 个, CG视频 %d 个%s"
+            % (hp, len(h_ol), len(h_st), len(h_vid),
                (", 骨骼 %d 个" % len(h_skel)) if h_skel else ""))
         ol_ids.update(h_ol)
-        th_ids.update(h_th)
         static_ids.update(h_st)
         for k, v in h_ex.items():
             extras.setdefault(k, []).extend(v)
@@ -254,11 +244,10 @@ def collect_tasks(har_files=None, ids_files=None, urls_files=None,
         ids = read_ids(fp)
         log("[IDS] %s -> %d 个" % (fp, len(ids)))
         for sid in ids:
-            if sid in ol_ids or sid in th_ids:
+            if sid in ol_ids:
                 continue
-            # 纯 --ids 输入: 自动探测两个生态
+            # 纯 --ids 输入: 自动探测 OL 各动皮目录
             ol_ids.add(sid)
-            th_ids.add(sid)
             static_ids.add(sid)
 
     for fp in urls_files or []:
@@ -267,26 +256,32 @@ def collect_tasks(har_files=None, ids_files=None, urls_files=None,
         videos.extend(urls)
 
     tasks = []  # (url, dest)
+    seen = set()
     for sid in sorted(ol_ids):
         folder = skin_dir / sid
         for base in OL_BASES:
-            if not probe(base + "/%s/daiji.json" % sid):
-                continue
-            has_hd = probe(base + "/%s/daiji_2.png" % sid)
-            has_xx = probe(base + "/%s/xingxiang.json" % sid)
+            found = False
             for name in OL_NAMES:
+                if not probe(base + "/%s/%s.json" % (sid, name)):
+                    continue
+                found = True
+                has_hd = probe(base + "/%s/%s_2.png" % (sid, name))
                 for suf in OL_SUFFIXES:
                     if suf == "_2.png" and not has_hd:
                         continue
                     fn = name + suf
-                    tasks.append((base + "/%s/%s" % (sid, fn), folder / fn))
-            if has_xx:
+                    dest = folder / fn
+                    if str(dest) not in seen:
+                        seen.add(str(dest))
+                        tasks.append((base + "/%s/%s" % (sid, fn), dest))
+            if not found:
+                continue
+            if probe(base + "/%s/xingxiang.json" % sid):
                 for fn in XINGXIANG_FILES:
-                    tasks.append((base + "/%s/%s" % (sid, fn), folder / fn))
-    for sid in sorted(th_ids):
-        folder = skin_dir / sid
-        for fn in TH_FILES:
-            tasks.append((TH_BASE + "/%s/%s" % (sid, fn), folder / fn))
+                    dest = folder / fn
+                    if str(dest) not in seen:
+                        seen.add(str(dest))
+                        tasks.append((base + "/%s/%s" % (sid, fn), dest))
     if not no_static:
         for sid in sorted(static_ids):
             tasks.append((OL_STATIC_BASE + "/%s.png" % sid,
