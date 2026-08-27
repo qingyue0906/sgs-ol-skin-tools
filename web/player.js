@@ -121,6 +121,7 @@ function applyCamera() {
   renderer.camera.zoom = zoom;
   const lbl = document.getElementById("zoomVal");
   if (lbl) lbl.textContent = "缩放 " + zoomLabel();
+  updatePinMarker();
 }
 
 function fit() { applyCamera(); }
@@ -142,20 +143,31 @@ canvas.addEventListener("wheel", e => {
 }, { passive: false });
 
 let dragging = false, lastX = 0, lastY = 0;
+let downX = 0, downY = 0, dragDist = 0;
 canvas.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   dragging = true;
   lastX = e.clientX; lastY = e.clientY;
+  downX = e.clientX; downY = e.clientY;
+  dragDist = 0;
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
 });
 canvas.addEventListener("pointermove", e => {
   if (!dragging) return;
+  dragDist = Math.max(dragDist, Math.hypot(e.clientX - downX, e.clientY - downY));
   pan.x -= e.clientX - lastX;
   pan.y -= e.clientY - lastY;
   lastX = e.clientX; lastY = e.clientY;
   applyCamera();
 });
-canvas.addEventListener("pointerup", () => { dragging = false; });
+canvas.addEventListener("pointerup", e => {
+  dragging = false;
+  // 单击判定：几乎无位移的快速点击 → 图钉模式放图钉；拖动平移逻辑不受影响
+  if (dragDist < 6 && texToolOn && pinMode) {
+    const rect = canvas.getBoundingClientRect();
+    placePin(e.clientX - rect.left, e.clientY - rect.top);
+  }
+});
 canvas.addEventListener("pointercancel", () => { dragging = false; });
 
 canvas.addEventListener("dblclick", () => {
@@ -166,6 +178,10 @@ canvas.addEventListener("dblclick", () => {
 
 // ---- 纹理查看工具（鼠标位置 -> 对应纹理位置）----
 let texToolOn = false;
+let pinMode = false;     // 图钉模式：纹理查看开启即激活，单击动皮固定命中位置
+let pinActive = false;   // 是否已放置图钉（固定后悬停不再刷新面板）
+let pinHits = [];        // 图钉命中快照 [{layer, slot, att, page, ...}]
+let pinWorld = null;     // 图钉世界坐标 {x, y}
 let texHits = [];   // [{layer, slot, att, page, pageW, pageH, u, v, u2, v2, wx, wy}]
 let texSel = -1;
 const MAX_TEX_HITS = 20;   // 单次悬停最多收集的贴图命中数（防极端重叠刷屏）
@@ -259,6 +275,7 @@ function hitLayer(l, wx, wy) {
 
 canvas.addEventListener("mousemove", e => {
   if (!texToolOn || !layers.length) return;
+  if (pinActive) return;   // 图钉已固定：悬停不再刷新面板（快照锁定）
   const rect = canvas.getBoundingClientRect();
   const w = worldAtMouse(e.clientX - rect.left, e.clientY - rect.top);
   const hits = [];
@@ -388,13 +405,117 @@ function drawCrop(crop, img, h) {
   crop.style.imageRendering = scale < 1 ? "" : "pixelated";
 }
 
+// ---- 图钉固定工具（单击锁定纹理，鼠标解放后可滚动右侧面板）----
+function screenFromWorld(wx, wy) {
+  if (!renderer || !layers.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const l of layers) {
+    if (!l.bounds) continue;
+    minX = Math.min(minX, l.bounds.minX); minY = Math.min(minY, l.bounds.minY);
+    maxX = Math.max(maxX, l.bounds.maxX); maxY = Math.max(maxY, l.bounds.maxY);
+  }
+  if (!isFinite(minX)) return null;
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const z = 1 / (Math.min(canvas.width / w, canvas.height / h) * 0.94 * zoomMul);
+  const scale = canvas.width / Math.max(1, canvas.clientWidth);
+  const cw = Math.max(1, canvas.clientWidth), ch = Math.max(1, canvas.clientHeight);
+  // worldAtMouse 的逆变换
+  return { x: (wx - cx) / (z * scale) - pan.x + cw / 2,
+           y: ch / 2 - pan.y - (wy - cy) / (z * scale) };
+}
+
+let pinMarker = null;
+function ensurePinMarker() {
+  if (pinMarker) return pinMarker;
+  const main = document.getElementById("main");
+  pinMarker = document.createElement("div");
+  pinMarker.id = "texPin";
+  main.appendChild(pinMarker);
+  return pinMarker;
+}
+
+function updatePinMarker() {
+  const m = ensurePinMarker();
+  if (!pinActive || !pinWorld) { m.style.display = "none"; return; }
+  const s = screenFromWorld(pinWorld.x, pinWorld.y);
+  if (!s) { m.style.display = "none"; return; }
+  m.style.display = "block";
+  m.style.left = s.x + "px";
+  m.style.top = s.y + "px";
+}
+
+function placePin(mx, my) {
+  if (!layers.length) return;
+  const w = worldAtMouse(mx, my);
+  const hits = [];
+  if (w) {
+    for (const l of layers) {
+      if (!l.enabled) continue;
+      for (const h of hitLayer(l, w.x, w.y)) {
+        if (hits.length >= MAX_TEX_HITS) break;
+        hits.push(h);
+      }
+      if (hits.length >= MAX_TEX_HITS) break;
+    }
+  }
+  if (!hits.length) {
+    showPinTip("该位置未命中纹理，图钉未放置");
+    return;
+  }
+  pinWorld = w;
+  pinHits = hits;
+  pinActive = true;
+  texHits = hits;
+  texSel = hits.length - 1;
+  renderTexPanel();
+  updatePinMarker();
+  showPinTip("已固定该位置纹理，可移开鼠标滚动查看右侧面板");
+}
+
+function clearPin() {
+  pinActive = false;
+  pinHits = [];
+  pinWorld = null;
+  updatePinMarker();
+  texHits = []; texSel = -1;
+  texHitsEl._key = null; texDetailEl._pagesKey = null;
+  renderTexPanel();
+}
+
+let pinTipTimer = null;
+function showPinTip(msg) {
+  let tip = document.getElementById("texPinTip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "texPinTip";
+    document.getElementById("main").appendChild(tip);
+  }
+  tip.textContent = msg;
+  tip.classList.remove("show");
+  void tip.offsetWidth;   // 强制重排，重启动画
+  tip.classList.add("show");
+  clearTimeout(pinTipTimer);
+  pinTipTimer = setTimeout(() => tip.classList.remove("show"), 4000);
+}
+
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  if (texToolOn && pinMode && pinActive) {
+    clearPin();
+    showPinTip("图钉已解除，鼠标悬停可实时查看，单击可重新固定");
+  }
+});
+
 document.getElementById("btnTex").addEventListener("click", () => {
   texToolOn = !texToolOn;
+  pinMode = texToolOn;   // 纹理查看开启即进入图钉模式
   texPanel.classList.toggle("hidden", !texToolOn);
   document.getElementById("btnTex").classList.toggle("active", texToolOn);
   if (!texToolOn) {
-    texHits = []; texSel = -1;
-    texHitsEl._key = null; texDetailEl._pagesKey = null;
+    clearPin();
+  } else {
+    showPinTip("图钉模式：单击动皮固定纹理查看，再单击其他位置更换，右键解除；拖动/缩放不受影响");
   }
   renderTexPanel();
 });
@@ -508,7 +629,8 @@ function loadSkin(i) {
   zoomMul = 1;
   pan.x = 0; pan.y = 0;
   texHits = []; texSel = -1;
-  if (texHitsEl) { texHitsEl._key = null; texDetailEl._src = null; }
+  if (texHitsEl) { texHitsEl._key = null; texDetailEl._pagesKey = null; }
+  clearPin();
   skinNameEl.textContent = id + "（" + (i + 1) + "/" + skinIds.length + "）";
   highlightList();
   hideMsg();
@@ -589,10 +711,10 @@ function setStaticOn(on) {
     }
     if (texToolOn) {  // 静态图下纹理工具无意义，关闭
       texToolOn = false;
+      pinMode = false;
       texPanel.classList.add("hidden");
       document.getElementById("btnTex").classList.remove("active");
-      texHits = []; texSel = -1;
-      texHitsEl._key = null; texDetailEl._pagesKey = null;
+      clearPin();
     }
   } else {
     staticExitState();

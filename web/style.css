@@ -174,3 +174,31 @@ footer input[type=range] { width: 90px; }
   border-radius: 6px; padding: 3px 8px; }
 .layer-row .lname { color: #f0b64d; font-weight: bold; font-size: 12px; }
 .layer-row.off { opacity: 0.45; }
+
+/* ---------- 纹理图钉工具 ---------- */
+#texPin {
+  position: absolute; z-index: 3; pointer-events: none; display: none;
+  width: 16px; height: 26px;
+  transform: translate(-50%, -100%);
+}
+#texPin::before {   /* 针尖，对准固定点 */
+  content: ""; position: absolute; left: 50%; top: 14px;
+  transform: translateX(-50%);
+  border: 4px solid transparent; border-top: 9px solid #d92b2b;
+}
+#texPin::after {    /* 图钉头 */
+  content: ""; position: absolute; left: 50%; top: 0;
+  transform: translate(-50%, 0);
+  width: 16px; height: 16px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff8a8a, #e23c3c 65%, #b02020);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,.45);
+}
+#texPinTip {
+  position: absolute; left: 50%; top: 24px; transform: translateX(-50%);
+  background: rgba(20,22,28,.94); border: 1px solid #f0b64d; color: #f0b64d;
+  padding: 8px 16px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+  pointer-events: none; z-index: 5; opacity: 0; transition: opacity .25s;
+  max-width: 80%; text-align: center;
+}
+#texPinTip.show { opacity: 1; }
