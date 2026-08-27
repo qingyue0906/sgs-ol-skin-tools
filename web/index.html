@@ -52,11 +52,18 @@
   </div>
   <div id="layout">
     <div id="side">
-      <h3>皮肤列表</h3>
+      <div class="side-head">
+        <h3>皮肤列表</h3>
+        <span class="view-btns">
+          <button id="btnGrid" class="view-btn active" title="网格显示（static 缩略图）">网格</button>
+          <button id="btnList" class="view-btn" title="列表显示">列表</button>
+        </span>
+      </div>
       <ul id="skinList"></ul>
     </div>
     <div id="main">
       <canvas id="glCanvas"></canvas>
+      <img id="staticImg" alt="静态皮肤图" hidden>
       <div id="msg"></div>
     </div>
     <div id="texPanel" class="hidden">
@@ -67,6 +74,7 @@
   <footer>
     <button id="btnPlay">暂停</button>
     <button id="btnTex">纹理查看</button>
+    <button id="btnStatic" title="切换为静态图预览（static.png）">静态图</button>
     <label>速度 <input id="speed" type="range" min="25" max="400" value="100"></label>
     <span id="speedVal">1.0x</span>
     <label title="0 = 不限制">帧率 <input id="fps" type="number" min="0" max="240" value="60"></label>
@@ -85,9 +93,9 @@
   </footer>
 </div>
 
-<script src="spine-webgl.js?v=2"></script>
-<script src="player.js?v=2"></script>
-<script src="downloader.js?v=2"></script>
+<script src="spine-webgl.js?v=4"></script>
+<script src="player.js?v=4"></script>
+<script src="downloader.js?v=4"></script>
 <script>
 "use strict";
 const tabDownload = document.getElementById("tabDownload");

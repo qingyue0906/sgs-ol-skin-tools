@@ -18,6 +18,10 @@ let speed = 1, looping = true, playing = true, zoomMul = 1, loadSeq = 0;
 let pan = { x: 0, y: 0 };   // 相对适配中心的偏移（CSS 像素）
 let fpsLimit = 60, lastFrame = 0;
 let playMode = "auto";      // auto=出场→待机循环 / chu=全部出场循环 / daiji=全部待机循环
+let skinView = "grid";      // grid=网格（static 缩略图） / list=列表
+let staticOn = false;       // 静态图预览开关
+let staticWasPlaying = true;// 进入静态图前的播放状态
+let skinHasStatic = false;  // 当前皮肤是否有 static.png
 
 function setStatus(s) { statusEl.textContent = s || ""; }
 function showMsg(s) { msgEl.textContent = s; msgEl.style.display = "block"; }
@@ -453,6 +457,19 @@ function loadSkin(i) {
   setStatus("加载 " + id + " ...");
   fetchJSON("/api/skin/" + id).then(info => {
     if (seq !== loadSeq) return;
+    skinHasStatic = info.files.includes("static.png");
+    const bs = document.getElementById("btnStatic");
+    if (bs) bs.disabled = !skinHasStatic;
+    if (staticOn) {
+      // 静态图模式下切换皮肤：保持静态图，只换图，不加载动皮
+      if (skinHasStatic) {
+        const img = document.getElementById("staticImg");
+        if (img) img.src = "/output/skins/" + id + "/static.png";
+        setStatus("静态图预览");
+        return;
+      }
+      staticExitState();  // 新皮肤没有静皮，退出静态图模式继续加载动皮
+    }
     const names = LAYER_NAMES.filter(n =>
       info.files.includes(n + ".json") && info.files.includes(n + ".atlas"));
     initGL();
@@ -477,26 +494,106 @@ function loadSkin(i) {
   }).catch(e => { if (seq === loadSeq) { setStatus(""); showMsg("读取失败: " + e); } });
 }
 
+function staticExitState() {
+  // 仅退出静态图状态与 UI，不重载动皮（调用方负责重载）
+  staticOn = false;
+  const img = document.getElementById("staticImg");
+  if (img) img.hidden = true;
+  const bs = document.getElementById("btnStatic");
+  if (bs) bs.classList.remove("active");
+  if (staticWasPlaying && !playing) {
+    playing = true;
+    const bp = document.getElementById("btnPlay");
+    if (bp) bp.textContent = "暂停";
+  }
+}
+
+function setStaticOn(on) {
+  const img = document.getElementById("staticImg");
+  const bs = document.getElementById("btnStatic");
+  if (!img || !bs || on === staticOn) return;
+  staticOn = on;
+  if (staticOn) {
+    if (!skinHasStatic || cur < 0) { staticOn = false; return; }
+    // 彻底清理动皮（释放资源、清空图层与画布），避免透出暂停的动皮帧
+    if (am) { try { am.dispose(); } catch (e) {} am = null; }
+    layers = [];
+    const ctrls = document.getElementById("layerControls");
+    if (ctrls) ctrls.innerHTML = "";
+    const gl = context ? context.gl : null;
+    if (gl) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+    img.src = "/output/skins/" + skinIds[cur] + "/static.png";
+    img.hidden = false;
+    staticWasPlaying = playing;
+    if (playing) {
+      playing = false;
+      document.getElementById("btnPlay").textContent = "播放";
+    }
+    if (texToolOn) {  // 静态图下纹理工具无意义，关闭
+      texToolOn = false;
+      texPanel.classList.add("hidden");
+      document.getElementById("btnTex").classList.remove("active");
+      texHits = []; texSel = -1;
+      texHitsEl._key = null; texDetailEl._src = null;
+    }
+  } else {
+    staticExitState();
+    loadSkin(cur);  // 重新加载动皮
+  }
+  bs.classList.toggle("active", staticOn);
+}
+
 function refreshSkins() {
   fetchJSON("/api/skins").then(d => {
     skinIds = d.skins || [];
-    skinListEl.innerHTML = "";
-    if (!skinIds.length) {
-      skinListEl.innerHTML = '<li class="empty">没有可播放的皮肤。<br>请先在"下载"面板抓取动皮。</li>';
-      skinNameEl.textContent = "无皮肤";
-      return;
-    }
-    for (let i = 0; i < skinIds.length; i++) {
-      const li = document.createElement("li");
-      const b = document.createElement("button");
-      b.textContent = skinIds[i];
-      b.dataset.i = i;
-      b.addEventListener("click", () => loadSkin(parseInt(b.dataset.i, 10)));
-      li.appendChild(b);
-      skinListEl.appendChild(li);
-    }
+    renderSkinList();
     if (cur < 0) loadSkin(0); else loadSkin(cur);
   }).catch(e => showMsg("无法连接服务器: " + e));
+}
+
+function renderSkinList() {
+  skinListEl.innerHTML = "";
+  if (!skinIds.length) {
+    skinListEl.innerHTML = '<li class="empty">没有可播放的皮肤。<br>请先在"下载"面板抓取动皮。</li>';
+    skinNameEl.textContent = "无皮肤";
+    return;
+  }
+  const grid = skinView === "grid";
+  skinListEl.classList.toggle("grid", grid);
+  const side = document.getElementById("side");
+  if (side) side.classList.toggle("grid-mode", grid);
+  for (let i = 0; i < skinIds.length; i++) {
+    const id = skinIds[i];
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.dataset.i = i;
+    if (grid) {
+      li.className = "grid-item";
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = id;
+      img.src = "/output/skins/" + id + "/static.png";
+      img.onerror = () => { img.onerror = null; img.classList.add("missing"); };
+      b.appendChild(img);
+      const span = document.createElement("span");
+      span.textContent = id;
+      b.appendChild(span);
+    } else {
+      b.textContent = id;
+    }
+    b.addEventListener("click", () => loadSkin(parseInt(b.dataset.i, 10)));
+    li.appendChild(b);
+    skinListEl.appendChild(li);
+  }
+  highlightList();
+}
+
+function setSkinView(v) {
+  if (v !== "grid" && v !== "list") return;
+  skinView = v;
+  document.getElementById("btnGrid").classList.toggle("active", v === "grid");
+  document.getElementById("btnList").classList.toggle("active", v === "list");
+  renderSkinList();
 }
 
 function highlightList() {
@@ -541,6 +638,9 @@ document.getElementById("btnPlay").addEventListener("click", () => {
   playing = !playing;
   document.getElementById("btnPlay").textContent = playing ? "暂停" : "播放";
 });
+document.getElementById("btnGrid").addEventListener("click", () => setSkinView("grid"));
+document.getElementById("btnList").addEventListener("click", () => setSkinView("list"));
+document.getElementById("btnStatic").addEventListener("click", () => setStaticOn(!staticOn));
 document.getElementById("speed").addEventListener("input", e => {
   speed = parseInt(e.target.value, 10) / 100;
   document.getElementById("speedVal").textContent = speed.toFixed(2) + "x";
@@ -558,6 +658,17 @@ document.getElementById("playModeSel").addEventListener("change", e => {
   applyPlayMode();
 });
 document.getElementById("btnShot").addEventListener("click", () => {
+  const img = document.getElementById("staticImg");
+  if (staticOn && img && img.complete && img.naturalWidth) {
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img, 0, 0);
+    const a = document.createElement("a");
+    a.download = "skin_" + (skinIds[cur] || "shot") + "_static.png";
+    a.href = c.toDataURL("image/png");
+    a.click();
+    return;
+  }
   if (!layers.length) return;
   const a = document.createElement("a");
   a.download = "skin_" + (skinIds[cur] || "shot") + ".png";
