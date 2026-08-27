@@ -11,5 +11,6 @@ __pycache__/
 # note
 note.txt
 
-#
+# 呜呜，被opencode go被刺了，额度用完了，试试免费的workbuddy。
+# nnd，提交时workbuddy的沙箱机制把.git/删了，废了好大功夫才恢复，不能让它提交了。
 /.workbuddy/
