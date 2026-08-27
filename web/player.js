@@ -168,6 +168,7 @@ canvas.addEventListener("dblclick", () => {
 let texToolOn = false;
 let texHits = [];   // [{layer, slot, att, page, pageW, pageH, u, v, u2, v2, wx, wy}]
 let texSel = -1;
+const MAX_TEX_HITS = 20;   // 单次悬停最多收集的贴图命中数（防极端重叠刷屏）
 const texPanel = document.getElementById("texPanel");
 const texHitsEl = document.getElementById("texHits");
 const texDetailEl = document.getElementById("texDetail");
@@ -209,11 +210,13 @@ function triBary(px, py, ax, ay, bx, by, cx, cy) {
 
 function hitLayer(l, wx, wy) {
   const slots = l.skeleton.slots;
+  const out = [];
   let scratch = null;
+  const seen = new Set();  // 同一附件（mesh 多三角形命中）只记一处
   for (let si = slots.length - 1; si >= 0; si--) {
     const slot = slots[si];
     const att = slot.getAttachment();
-    if (!att || !att.region || !att.region.page) continue;
+    if (!att || !att.region || !att.region.page || seen.has(att)) continue;
     let verts, tris, uvs;
     if (att.offset) {                       // RegionAttachment
       att.updateRegion();
@@ -244,12 +247,14 @@ function hitLayer(l, wx, wy) {
         uMin = Math.min(uMin, uvs[k]); uMax = Math.max(uMax, uvs[k]);
         vMin = Math.min(vMin, uvs[k + 1]); vMax = Math.max(vMax, uvs[k + 1]);
       }
-      return { layer: l, slot: slot.data.name, att: att.name,
-               page: page.name, pageW: page.width, pageH: page.height,
-               u: u, v: v, u2: uMax, v2: vMax, wx: wx, wy: wy };
+      out.push({ layer: l, slot: slot.data.name, att: att.name,
+                 page: page.name, pageW: page.width, pageH: page.height,
+                 u: u, v: v, u2: uMax, v2: vMax, wx: wx, wy: wy });
+      seen.add(att);
+      break;  // 该附件已命中，跳过其余三角形
     }
   }
-  return null;
+  return out;
 }
 
 canvas.addEventListener("mousemove", e => {
@@ -260,8 +265,11 @@ canvas.addEventListener("mousemove", e => {
   if (w) {
     for (const l of layers) {
       if (!l.enabled) continue;
-      const hit = hitLayer(l, w.x, w.y);
-      if (hit) hits.push(hit);
+      for (const h of hitLayer(l, w.x, w.y)) {
+        if (hits.length >= MAX_TEX_HITS) break;
+        hits.push(h);
+      }
+      if (hits.length >= MAX_TEX_HITS) break;
     }
   }
   texHits = hits;
@@ -272,9 +280,16 @@ canvas.addEventListener("mousemove", e => {
 function renderTexPanel() {
   if (!texToolOn) return;
   const h = texHits[texSel] || null;
-  const key = h ? h.layer.name + "|" + h.slot + "|" + h.att : "";
-  if (key !== texHitsEl._key) {
+  // 1) 命中条目列表（含数量提示）
+  const listKey = texHits
+    .map(x => x.layer.name + "|" + x.slot + "|" + x.att + "|" + x.u + "|" + x.v).join(";") + "|" + texSel;
+  if (listKey !== texHitsEl._key) {
     texHitsEl.innerHTML = "";
+    const info = document.createElement("div");
+    info.className = "tex-hits-info";
+    info.textContent = "命中 " + texHits.length + " 处贴图" +
+      (texHits.length >= MAX_TEX_HITS ? "（已达上限，仅显示前 " + MAX_TEX_HITS + " 处）" : "（点选高亮）");
+    texHitsEl.appendChild(info);
     texHits.forEach((hit, i) => {
       const b = document.createElement("button");
       b.className = i === texSel ? "active" : "";
@@ -282,32 +297,75 @@ function renderTexPanel() {
       b.addEventListener("click", () => { texSel = i; renderTexPanel(); });
       texHitsEl.appendChild(b);
     });
-    texHitsEl._key = key;
+    texHitsEl._key = listKey;
   }
-  if (!h) {
-    texDetailEl.innerHTML = '<div class="tex-empty">未命中纹理<br>鼠标移到皮肤上查看</div>';
-    texDetailEl._src = null;
-    return;
-  }
-  const src = "/output/skins/" + skinIds[cur] + "/" + h.page;
-  if (texDetailEl._src !== src) {
+  // 2) 贴图页分组：全部命中画十字（选中红色、其余蓝色半透明）
+  let pagesEl = document.getElementById("texPages");
+  if (!pagesEl) {
     texDetailEl.innerHTML =
-      '<div class="tex-label">贴图页 ' + h.page + '（' + h.pageW + 'x' + h.pageH + '）</div>' +
-      '<div id="texPageWrap"><img id="texPageImg" alt=""><span id="texCross"></span></div>' +
+      '<div id="texPages"></div>' +
       '<div class="tex-label">区域裁剪放大</div><canvas id="texCrop"></canvas>' +
       '<div class="tex-label">信息</div><div class="tex-info"></div>';
-    texDetailEl._src = src;
+    pagesEl = document.getElementById("texPages");
   }
-  const img = document.getElementById("texPageImg");
-  const cross = document.getElementById("texCross");
+  const infoEl = texDetailEl.querySelector(".tex-info");
   const crop = document.getElementById("texCrop");
-  const info = texDetailEl.querySelector(".tex-info");
-  if (img.src !== src) img.src = src;
-  cross.style.left = (h.u * 100).toFixed(2) + "%";
-  cross.style.top = (h.v * 100).toFixed(2) + "%";
-  if (img.complete && img.naturalWidth) drawCrop(crop, img, h);
-  else img.onload = () => drawCrop(crop, img, h);
-  info.innerHTML =
+  if (!h) {
+    pagesEl.innerHTML = "";
+    texDetailEl._pagesKey = "";
+    if (crop) crop.style.display = "none";
+    if (infoEl) infoEl.innerHTML = '<div class="tex-empty">未命中纹理<br>鼠标移到皮肤上查看</div>';
+    return;
+  }
+  const pagesKey = texHits.map(x => x.page + "|" + x.u + "|" + x.v + "|" + x.slot).join(";");
+  if (texDetailEl._pagesKey !== pagesKey) {
+    texDetailEl._pagesKey = pagesKey;
+    const groups = new Map();
+    texHits.forEach((hit, i) => {
+      if (!groups.has(hit.page)) groups.set(hit.page, []);
+      groups.get(hit.page).push({ hit, i });
+    });
+    pagesEl.innerHTML = "";
+    for (const [page, items] of groups) {
+      const it0 = items[0].hit;
+      const block = document.createElement("div");
+      block.className = "tex-page-block";
+      block.dataset.page = page;
+      const label = document.createElement("div");
+      label.className = "tex-label";
+      label.textContent = "贴图页 " + page + "（" + it0.pageW + "x" + it0.pageH + "）· " + items.length + " 处标记";
+      block.appendChild(label);
+      const wrap = document.createElement("div");
+      wrap.className = "tex-page-wrap";
+      const img = document.createElement("img");
+      img.className = "tex-page-img";
+      img.alt = page;
+      img.src = "/output/skins/" + skinIds[cur] + "/" + page;
+      wrap.appendChild(img);
+      for (const { hit, i } of items) {
+        const cross = document.createElement("span");
+        cross.className = "tex-cross" + (i === texSel ? " active" : "");
+        cross.dataset.i = i;
+        cross.style.left = (hit.u * 100).toFixed(2) + "%";
+        cross.style.top = (hit.v * 100).toFixed(2) + "%";
+        wrap.appendChild(cross);
+      }
+      block.appendChild(wrap);
+      pagesEl.appendChild(block);
+    }
+  } else {
+    // 页面组未变，仅刷新十字选中态（避免图片重新加载）
+    pagesEl.querySelectorAll(".tex-cross").forEach(c =>
+      c.classList.toggle("active", parseInt(c.dataset.i, 10) === texSel));
+  }
+  // 3) 底部详情：裁剪放大 + 信息，跟随选中条目
+  crop.style.display = "block";
+  const img = pagesEl.querySelector('[data-page="' + h.page + '"] .tex-page-img');
+  if (img) {
+    if (img.complete && img.naturalWidth) drawCrop(crop, img, h);
+    else img.onload = () => drawCrop(crop, img, h);
+  }
+  infoEl.innerHTML =
     "<b>层:</b> " + LAYER_LABEL[h.layer.name] + "（" + h.layer.name + "）<br>" +
     "<b>槽位:</b> " + h.slot + "<br>" +
     "<b>附件:</b> " + h.att + "<br>" +
@@ -336,7 +394,7 @@ document.getElementById("btnTex").addEventListener("click", () => {
   document.getElementById("btnTex").classList.toggle("active", texToolOn);
   if (!texToolOn) {
     texHits = []; texSel = -1;
-    texHitsEl._key = null; texDetailEl._src = null;
+    texHitsEl._key = null; texDetailEl._pagesKey = null;
   }
   renderTexPanel();
 });
@@ -534,7 +592,7 @@ function setStaticOn(on) {
       texPanel.classList.add("hidden");
       document.getElementById("btnTex").classList.remove("active");
       texHits = []; texSel = -1;
-      texHitsEl._key = null; texDetailEl._src = null;
+      texHitsEl._key = null; texDetailEl._pagesKey = null;
     }
   } else {
     staticExitState();

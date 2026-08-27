@@ -129,16 +129,21 @@ button.active { background: #39426e; border-color: #f0b64d; color: #fff; }
 #texHits button.active { background: #39426e; color: #fff; border-color: #f0b64d; }
 .tex-empty { color: #7a819c; font-size: 12px; text-align: center; padding: 20px 0; }
 .tex-label { color: #9aa3c0; font-size: 11px; margin: 4px 0 2px; }
-#texPageWrap { position: relative; background: #0d0f15; border: 1px solid #2c3145;
+.tex-hits-info { color: #9aa3c0; font-size: 11px; margin: 2px 0; }
+#texDetail { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.tex-page-block { display: flex; flex-direction: column; gap: 4px; }
+.tex-page-wrap { position: relative; background: #0d0f15; border: 1px solid #2c3145;
   border-radius: 6px; overflow: hidden; }
-#texPageImg { display: block; width: 100%; height: auto; }
-#texCross { position: absolute; width: 18px; height: 18px;
-  transform: translate(-50%, -50%); pointer-events: none; }
-#texCross::before, #texCross::after {
-  content: ""; position: absolute; background: #ff4d4d; box-shadow: 0 0 2px #000;
+.tex-page-img { display: block; width: 100%; height: auto; }
+.tex-cross { position: absolute; width: 14px; height: 14px;
+  transform: translate(-50%, -50%); pointer-events: none; opacity: 0.6; }
+.tex-cross::before, .tex-cross::after {
+  content: ""; position: absolute; background: #4da3ff;
 }
-#texCross::before { left: 50%; top: 0; width: 1px; height: 100%; }
-#texCross::after { top: 50%; left: 0; height: 1px; width: 100%; }
+.tex-cross::before { left: 50%; top: 0; width: 1.5px; height: 100%; }
+.tex-cross::after { top: 50%; left: 0; height: 1.5px; width: 100%; }
+.tex-cross.active { width: 18px; height: 18px; opacity: 1; }
+.tex-cross.active::before, .tex-cross.active::after { background: #ff4d4d; }
 #texCrop { width: 100%; border: 1px solid #2c3145; border-radius: 6px;
   background: #0d0f15; }
 .tex-info { font-size: 12px; color: #aeb4cc; line-height: 1.8; word-break: break-all; }

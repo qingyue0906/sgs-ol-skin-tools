@@ -69,25 +69,27 @@ const ok = (cond, msg) => { console.log((cond ? "PASS " : "FAIL ") + msg); if (!
   const b = skeleton.slots[1].getAttachment();
   const ca = centroidOf(a, skeleton.slots[0]);
   const cb = centroidOf(b, skeleton.slots[1]);
-  const ha = hitLayer(layer, ca.x, ca.y);
-  const hb = hitLayer(layer, cb.x, cb.y);
+  const ha = hitLayer(layer, ca.x, ca.y)[0];
+  const hb = hitLayer(layer, cb.x, cb.y)[0];
   ok(ha && ha.slot === "slot1" && ha.att === "rectA", "A 质心命中自身 slot1/rectA");
   ok(hb && hb.slot === "slot2" && hb.att === "rectB", "B 质心命中自身 slot2/rectB");
-  const hMid = hitLayer(layer, -25, 0);
+  const hMid = hitLayer(layer, -25, 0)[0];
   ok(hMid && hMid.slot === "slot1", "(-25,0) 命中 slot1");
-  ok(hitLayer(layer, 9999, 9999) === null, "远处点未命中");
+  ok(hitLayer(layer, 9999, 9999).length === 0, "远处点未命中");
   // UV 插值: rectA 纹理 u∈[0,100/256], 世界 x∈[-100,0], (-25,0) -> u≈0.293, v≈0.1953(纵向中心)
   ok(hMid && Math.abs(hMid.u - 0.2930) < 0.02 && Math.abs(hMid.v - 0.1953) < 0.02,
     "UV 插值 u=" + (hMid ? hMid.u.toFixed(3) : "-") + " v=" + (hMid ? hMid.v.toFixed(3) : "-"));
-  const hp = hitLayer(layer, 25, 0);
+  const hp = hitLayer(layer, 25, 0)[0];
   ok(hp && hp.slot === "slot2", "(25,0) 命中 slot2");
 }
 
 // ---- 合成测试：重叠（B 盖在 A 上）----
 {
   const { skeleton, layer } = buildSkeleton(true);
-  const hit = hitLayer(layer, 0, 0);
-  ok(hit && hit.slot === "slot2", "重叠区域命中最上层 slot2/rectB");
+  const hits = hitLayer(layer, 0, 0);
+  ok(hits.length === 2, "重叠区域同时命中 2 处贴图");
+  ok(hits[0] && hits[0].slot === "slot2", "重叠区域最上层 slot2/rectB");
+  ok(hits[1] && hits[1].slot === "slot1", "重叠区域下层 slot1/rectA 也被标记");
 }
 
 // ---- 真实皮肤冒烟：所有 region 质心至少命中一个槽位 ----
@@ -113,7 +115,7 @@ const ok = (cond, msg) => { console.log((cond ? "PASS " : "FAIL ") + msg); if (!
     if (!att || !att.offset) continue;
     tested++;
     const c = centroidOf(att, slot);
-    const hit = hitLayer(layer, c.x, c.y);
+    const hit = hitLayer(layer, c.x, c.y)[0];
     if (hit) passed++;
     if (hit && (hit.u < 0 || hit.u > 1 || hit.v < 0 || hit.v > 1)) uvBad++;
   }
@@ -121,7 +123,7 @@ const ok = (cond, msg) => { console.log((cond ? "PASS " : "FAIL ") + msg); if (!
   ok(uvBad === 0, "UV 无越界");
   const off = new spine.Vector2(), size = new spine.Vector2();
   sk.getBounds(off, size, new Array(2));
-  ok(hitLayer(layer, off.x - 5000, off.y - 5000) === null, "远处未命中");
+  ok(hitLayer(layer, off.x - 5000, off.y - 5000).length === 0, "远处未命中");
 }
 
 console.log(fail ? "结果: 失败 " + fail + " 项" : "结果: 全部成功");
