@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <title>三国杀OL 资源工具</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <header>
@@ -57,7 +57,12 @@
         <span class="view-btns">
           <button id="btnGrid" class="view-btn active" title="网格显示（static 缩略图）">网格</button>
           <button id="btnList" class="view-btn" title="列表显示">列表</button>
+          <button id="btnLabel" class="view-btn" title="当前显示皮肤名，点击切换为文件夹 ID">名称</button>
         </span>
+      </div>
+      <div class="side-tools">
+        <input id="skinSearch" type="search" placeholder="搜索 ID 或皮肤名" autocomplete="off">
+        <span id="skinCount" class="count" title="可见数量 / 全部数量"></span>
       </div>
       <ul id="skinList"></ul>
     </div>
@@ -94,7 +99,7 @@
 </div>
 
 <script src="spine-webgl.js?v=5"></script>
-<script src="player.js?v=7"></script>
+<script src="player.js?v=8"></script>
 <script src="downloader.js?v=5"></script>
 <script>
 "use strict";

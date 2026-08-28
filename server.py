@@ -214,10 +214,21 @@ class Handler(SimpleHTTPRequestHandler):
             skins = []
             if SKINS.is_dir():
                 for d in sorted(SKINS.iterdir()):
-                    if d.is_dir() and any(
-                            (d / (n + ".json")).exists() and (d / (n + ".atlas")).exists()
-                            for n in PLAYABLE_LAYERS):
-                        skins.append({"id": d.name, "name": grabber.skin_name(d.name, names)})
+                    if not d.is_dir():
+                        continue
+                    # playable=有可播放动皮；static=有静皮大图。二者有一即进列表
+                    playable = any(
+                        (d / (n + ".json")).exists() and (d / (n + ".atlas")).exists()
+                        for n in PLAYABLE_LAYERS)
+                    has_static = (d / "static.png").exists()
+                    if not (playable or has_static):
+                        continue
+                    skins.append({
+                        "id": d.name,
+                        "name": grabber.skin_name(d.name, names),
+                        "playable": playable,
+                        "static": has_static,
+                    })
             self._json({"skins": skins})
             return
         m = re.match(r"^/api/skin/([0-9A-Za-z_]+)$", path)

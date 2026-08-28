@@ -90,7 +90,20 @@ button.danger:hover { background: #8a3a3a; }
 }
 #side .view-btn:hover { background: #2c3250; }
 #side .view-btn.active { background: #39426e; color: #fff; border-color: #f0b64d; }
+#side .view-btn:disabled, footer button:disabled, footer select:disabled {
+  opacity: .4; cursor: default;
+}
 #side.grid-mode { width: 264px; }
+#side .side-tools { display: flex; align-items: center; gap: 4px; margin: 0 2px 8px; }
+#side .side-tools input {
+  flex: 1; min-width: 0; background: #12151f; color: #dfe3f0;
+  border: 1px solid #3a4168; border-radius: 4px; padding: 3px 6px; font-size: 12px;
+}
+#side .side-tools input::placeholder { color: #6b7391; }
+#side .side-tools input:focus { outline: none; border-color: #f0b64d; }
+#side .side-tools .count {
+  flex: none; color: #7a819c; font-size: 11px; font-variant-numeric: tabular-nums;
+}
 #skinList.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 #skinList.grid .grid-item button {
   display: flex; flex-direction: column; width: 100%;
@@ -113,12 +126,27 @@ button.danger:hover { background: #8a3a3a; }
 #side li button {
   width: 100%; text-align: left; background: none; color: #c9cede;
   border: none; padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 13px;
+  display: flex; align-items: center; gap: 6px;
+}
+#side li button span {
+  flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #side li button:hover { background: #262b40; }
 #side li button.active { background: #39426e; color: #fff; }
 #side .empty { color: #7a819c; padding: 8px; font-size: 12px; }
 button.active { background: #39426e; border-color: #f0b64d; color: #fff; }
+
+/* 仅静皮（无动皮）皮肤的角标 */
+#skinList.grid .grid-item button { position: relative; }
+.badge {
+  position: absolute; top: 3px; right: 3px; z-index: 2;
+  background: rgba(10, 13, 20, .78); color: #f0b64d;
+  border: 1px solid #f0b64d; border-radius: 3px;
+  font-size: 10px; font-style: normal; line-height: 1.5; padding: 0 3px;
+}
+.badge.inline { position: static; flex: none; }
+#side li button.static-only span { color: #8b93ad; }
 
 /* ---------- 纹理查看面板 ---------- */
 #texPanel {
