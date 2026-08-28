@@ -18,6 +18,7 @@
   output/skins/{皮肤ID}/   动皮文件 + static.png(静皮大图)
   output/cg/              CG 视频
   output/extra/           --skels 抓到的其他骨骼文件
+  output/.cache/skin_names.json   {skinID: 皮肤名} 映射，供 WebUI 列表显示
 
 资源规律（均已实测验证，纯 OL 互通版）:
   OL动皮(Spine JSON，文件布局因皮肤而异，常见 daiji/beijing/qianjing 三层，含 _2 高清变体):
@@ -217,6 +218,22 @@ def atlas_pages(path):
     return pages
 
 
+def fetch_cfg_zip(timeout=60):
+    """拉取并解压游戏配置包 laya_json_release.cfg，返回 ZipFile（失败抛异常）。
+
+    layamd5.json 只用来取版本号拼 ?v= 防 CDN 缓存，取不到也能直接下载。
+    """
+    version = None
+    try:
+        req = urllib.request.Request(CFG_LAYAMD5, headers={"User-Agent": UA})
+        raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
+        version = (json.loads(raw) or {}).get("hash")
+    except Exception:
+        pass
+    url = CFG_BUNDLE + (("?v=" + version) if version else "")
+    return zipfile.ZipFile(io.BytesIO(http_get(url, timeout=timeout).read()))
+
+
 def load_skin_config(cache_path=None):
     """加载游戏皮肤配置表（speciaSkin），返回 {skinID: entry}。
 
@@ -234,17 +251,7 @@ def load_skin_config(cache_path=None):
         except Exception:
             pass
     try:
-        version = None
-        try:
-            req = urllib.request.Request(CFG_LAYAMD5, headers={"User-Agent": UA})
-            raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "replace")
-            version = (json.loads(raw) or {}).get("hash")
-        except Exception:
-            pass
-        url = CFG_BUNDLE + (("?v=" + version) if version else "")
-        data = http_get(url, timeout=60).read()
-        zf = zipfile.ZipFile(io.BytesIO(data))
-        obj = json.loads(zf.read(CFG_SKIN_FILE).decode("utf-8"))
+        obj = json.loads(fetch_cfg_zip().read(CFG_SKIN_FILE).decode("utf-8"))
         specia = obj["generalskin"]["speciaSkin"]
         spec = {str(e["skinID"]): e for e in specia if e.get("skinID")}
         cache.parent.mkdir(parents=True, exist_ok=True)
@@ -253,6 +260,60 @@ def load_skin_config(cache_path=None):
         return spec
     except Exception:
         return None
+
+
+def load_skin_names(cache_path=None):
+    """加载 {skinID: 皮肤名}，用于列表显示（如 74002 -> 水殿香来*曹金玉）。
+
+    来源与皮肤配置同一份 cfg 包，取 generalskin.items.item：该表字段是单字母缩写，
+    对照表在 root.abbreviation.field（skinID=a、skinname=c）。
+    多状态皮肤（58603_1）表里只有主 ID，由 skin_name() 回退查找。
+    任何失败返回 None（调用方回退只显示 ID）。
+    """
+    cache = Path(cache_path) if cache_path else Path("output") / ".cache" / "skin_names.json"
+    today = time.strftime("%Y-%m-%d")
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("date") == today and isinstance(data.get("names"), dict):
+                return data["names"]
+        except Exception:
+            pass
+    try:
+        obj = json.loads(fetch_cfg_zip().read(CFG_SKIN_FILE).decode("utf-8"))
+        abbr = {}
+        for f in ((obj.get("root") or {}).get("abbreviation") or {}).get("field", []):
+            if f.get("Long") and f.get("Short"):
+                abbr[f["Long"]] = f["Short"]
+        k_id = abbr.get("skinID", "a")
+        k_name = abbr.get("skinname", "c")
+        names = {}
+        for it in ((obj.get("generalskin") or {}).get("items") or {}).get("item", []):
+            sid = it.get(k_id)
+            if sid is None:
+                continue
+            name = (it.get(k_name) or "").strip()
+            if name:
+                names[str(sid)] = name
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"date": today, "names": names},
+                                    ensure_ascii=False), encoding="utf-8")
+        return names
+    except Exception:
+        return None
+
+
+def skin_name(sid, names):
+    """查皮肤名：先精确匹配，再回退去掉多状态后缀（58603_1 -> 58603），都没有返回空串"""
+    if not names:
+        return ""
+    hit = names.get(sid)
+    if hit:
+        return hit
+    base = re.sub(r"_\d+$", "", sid)
+    if base != sid:
+        return names.get(base, "")
+    return ""
 
 
 def skin_targets(sid, specia):

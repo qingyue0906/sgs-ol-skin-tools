@@ -6,7 +6,7 @@
 提供:
   /web/             WebUI（下载面板 + 播放器面板）
   /output/          下载的资源（静态）
-  /api/skins        皮肤列表 JSON（含 daiji.json 的可播放皮肤）
+  /api/skins        皮肤列表 JSON（含 daiji.json 的可播放皮肤，带官方皮肤名）
   /api/skin/{id}    某个皮肤的文件列表 JSON
   /api/cg           CG 视频列表
   /api/download     下载任务（GET 轮询状态 / POST 提交 / POST stop 取消）
@@ -32,6 +32,23 @@ ROOT = Path(__file__).resolve().parent
 SKINS = ROOT / "output" / "skins"
 PLAYABLE_LAYERS = ["daiji", "beijing", "qianjing", "xingxiang"]
 MAX_LOG = 500
+NAMES_CACHE_PATH = ROOT / "output" / ".cache" / "skin_names.json"
+NAMES_TTL = 3600          # 皮肤名映射的重试间隔（秒）
+_NAMES = {"at": 0.0, "names": None}
+
+
+def skin_names():
+    """{skinID: 皮肤名}，进程内缓存；拉不到时返回空字典（列表回退只显示 ID）"""
+    now = time.time()
+    if _NAMES["names"] is None and now - _NAMES["at"] > NAMES_TTL:
+        names = grabber.load_skin_names(NAMES_CACHE_PATH)
+        _NAMES["names"] = names if names is not None else {}
+        _NAMES["at"] = now
+        if _NAMES["names"]:
+            print("[names] 皮肤名映射 %d 条" % len(_NAMES["names"]), flush=True)
+        else:
+            print("[names] 皮肤名映射不可用，列表仅显示 ID", flush=True)
+    return _NAMES["names"] or {}
 
 
 def port_in_use(port):
@@ -193,13 +210,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/api/skins":
+            names = skin_names()
             skins = []
             if SKINS.is_dir():
                 for d in sorted(SKINS.iterdir()):
                     if d.is_dir() and any(
                             (d / (n + ".json")).exists() and (d / (n + ".atlas")).exists()
                             for n in PLAYABLE_LAYERS):
-                        skins.append(d.name)
+                        skins.append({"id": d.name, "name": grabber.skin_name(d.name, names)})
             self._json({"skins": skins})
             return
         m = re.match(r"^/api/skin/([0-9A-Za-z_]+)$", path)

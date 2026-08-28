@@ -14,6 +14,7 @@ const layerCtrlsEl = document.getElementById("layerControls");
 let context = null, renderer = null, am = null;
 let layers = [];        // {name, skeletonData, skeleton, state, enabled, animNames}
 let skinIds = [], cur = -1;
+let skinNames = {};     // {皮肤ID: 官方皮肤名}，取不到名字时列表回退只显示 ID
 let speed = 1, looping = true, playing = true, zoomMul = 1, loadSeq = 0;
 let pan = { x: 0, y: 0 };   // 相对适配中心的偏移（CSS 像素）
 let fpsLimit = 60, lastFrame = 0;
@@ -24,6 +25,10 @@ let staticWasPlaying = true;// 进入静态图前的播放状态
 let skinHasStatic = false;  // 当前皮肤是否有 static.png
 
 function setStatus(s) { statusEl.textContent = s || ""; }
+
+// 列表显示文本：有名字显示"名称"，没有回退显示 ID；title 始终带 ID 方便对照
+function skinLabel(id) { return skinNames[id] || id; }
+function skinTitle(id) { return skinNames[id] ? id : ""; }
 function showMsg(s) { msgEl.textContent = s; msgEl.style.display = "block"; }
 function hideMsg() { msgEl.style.display = "none"; }
 
@@ -631,7 +636,10 @@ function loadSkin(i) {
   texHits = []; texSel = -1;
   if (texHitsEl) { texHitsEl._key = null; texDetailEl._pagesKey = null; }
   clearPin();
-  skinNameEl.textContent = id + "（" + (i + 1) + "/" + skinIds.length + "）";
+  const nm = skinNames[id];
+  skinNameEl.textContent = (nm ? nm + " " : "") + id +
+    "（" + (i + 1) + "/" + skinIds.length + "）";
+  skinNameEl.title = id;
   highlightList();
   hideMsg();
   setStatus("加载 " + id + " ...");
@@ -725,7 +733,10 @@ function setStaticOn(on) {
 
 function refreshSkins() {
   fetchJSON("/api/skins").then(d => {
-    skinIds = d.skins || [];
+    const list = d.skins || [];
+    skinIds = list.map(s => (typeof s === "string" ? s : s.id));
+    skinNames = {};
+    list.forEach(s => { if (s && typeof s === "object" && s.name) skinNames[s.id] = s.name; });
     renderSkinList();
     if (cur < 0) loadSkin(0); else loadSkin(cur);
   }).catch(e => showMsg("无法连接服务器: " + e));
@@ -747,6 +758,7 @@ function renderSkinList() {
     const li = document.createElement("li");
     const b = document.createElement("button");
     b.dataset.i = i;
+    b.title = skinTitle(id);
     if (grid) {
       li.className = "grid-item";
       const img = document.createElement("img");
@@ -756,10 +768,10 @@ function renderSkinList() {
       img.onerror = () => { img.onerror = null; img.classList.add("missing"); };
       b.appendChild(img);
       const span = document.createElement("span");
-      span.textContent = id;
+      span.textContent = skinLabel(id);
       b.appendChild(span);
     } else {
-      b.textContent = id;
+      b.textContent = skinLabel(id);
     }
     b.addEventListener("click", () => loadSkin(parseInt(b.dataset.i, 10)));
     li.appendChild(b);
