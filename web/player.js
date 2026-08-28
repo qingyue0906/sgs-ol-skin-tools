@@ -893,8 +893,6 @@ function renderSkinList() {
   }
   const grid = skinView === "grid";
   skinListEl.classList.toggle("grid", grid);
-  const side = document.getElementById("side");
-  if (side) side.classList.toggle("grid-mode", grid);
   for (let i = 0; i < skinIds.length; i++) {
     const id = skinIds[i];
     const s = skinById(id);

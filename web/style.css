@@ -77,7 +77,8 @@ button.danger:hover { background: #8a3a3a; }
 #playerTop #status { color: #9aa3c0; font-size: 12px; }
 #layout { flex: 1; display: flex; min-height: 0; }
 #side {
-  width: 200px; background: #1a1e2b; border-right: 1px solid #2c3145;
+  /* 宽度固定为网格模式的宽度：切换网格/列表时面板不再忽宽忽窄 */
+  width: 264px; background: #1a1e2b; border-right: 1px solid #2c3145;
   overflow-y: auto; padding: 8px; flex: none;
 }
 #side h3 { color: #f0b64d; font-size: 13px; margin: 4px 2px 8px; }
@@ -93,7 +94,6 @@ button.danger:hover { background: #8a3a3a; }
 #side .view-btn:disabled, footer button:disabled, footer select:disabled {
   opacity: .4; cursor: default;
 }
-#side.grid-mode { width: 264px; }
 #side .side-tools { display: flex; align-items: center; gap: 4px; margin: 0 2px 8px; }
 #side .side-tools input {
   flex: 1; min-width: 0; background: #12151f; color: #dfe3f0;
